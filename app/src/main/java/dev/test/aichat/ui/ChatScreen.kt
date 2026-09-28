@@ -2,11 +2,12 @@ package dev.test.aichat.ui
 
 import android.widget.TextView
 import android.widget.Toast
-import android.text.SpannableStringBuilder
-import android.text.Spanned
-import android.text.style.ForegroundColorSpan
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.content.Context
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -65,10 +66,12 @@ internal fun ChatScreen(ui: UiState, title: String, messages: List<MessageEntity
                        onSend: (String) -> Unit, onPresented: (String) -> Unit, onStop: () -> Unit, onRetry: (String) -> Unit, onReconnect: () -> Unit, onPaywall: () -> Unit) {
     val imeVisible = WindowInsets.isImeVisible
     val keyboard = LocalSoftwareKeyboardController.current
+    val presenting = ui.presentingId != null
+    val busy = ui.sending || presenting
     var input by rememberSaveable(ui.chatId) { mutableStateOf("") }
     var showSuggestions by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
-        PageHeader(if (messages.isEmpty()) "AI Чат" else title, if (ui.sending) "Готовлю ответ для вас" else "Ваш помощник на каждый день",
+        PageHeader(if (messages.isEmpty()) "AI Чат" else title, if (busy) "Готовлю ответ для вас" else "Ваш помощник на каждый день",
             leading = { AppIconButton(Icons.Default.Menu, "Список чатов", onMenu) },
             trailing = { if (messages.isNotEmpty()) AppIconButton(Icons.Default.Add, "Новый чат", onNew, ChatColors.Lavender, ChatColors.Accent) })
         val displayedError = remember { mutableStateOf("") }
@@ -109,14 +112,18 @@ internal fun ChatScreen(ui: UiState, title: String, messages: List<MessageEntity
             LaunchedEffect(messages.size, last?.content?.length, last?.status, follow,
                 list.layoutInfo.viewportEndOffset, list.layoutInfo.visibleItemsInfo.lastOrNull { it.index == messages.lastIndex }?.size) {
                 if (follow) {
-                    val size = list.layoutInfo.visibleItemsInfo.lastOrNull { it.index == messages.lastIndex }?.size ?: 0
-                    list.scrollToItem(messages.lastIndex.coerceAtLeast(0), size)
+                    val item = list.layoutInfo.visibleItemsInfo.lastOrNull { it.index == messages.lastIndex }
+                    if (item == null) list.scrollToItem(messages.lastIndex.coerceAtLeast(0))
+                    else {
+                        val overflow = item.offset + item.size - list.layoutInfo.viewportEndOffset + list.layoutInfo.afterContentPadding
+                        if (overflow > 0) list.animateScrollBy(overflow.toFloat(), tween(120))
+                    }
                 }
             }
             Box(Modifier.weight(1f)) {
                 LazyColumn(state = list, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp)) {
                     items(messages, key = { it.id }) { message ->
-                        Box(Modifier.animateItem(fadeInSpec = tween(240), placementSpec = tween(240), fadeOutSpec = tween(160))) {
+                        Box(Modifier.animateItem(fadeInSpec = tween(240), placementSpec = null, fadeOutSpec = tween(160))) {
                         if (message.role == "user") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             Surface(color = ChatColors.Accent, shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp), modifier = Modifier.widthIn(max = 290.dp)) {
                                 Text(message.content, Modifier.padding(horizontal = 17.dp, vertical = 14.dp), color = Color.White, fontSize = 15.sp, lineHeight = 23.sp)
@@ -138,7 +145,7 @@ internal fun ChatScreen(ui: UiState, title: String, messages: List<MessageEntity
                     ui.connecting -> "Подключаемся…"
                     !account.loaded -> "Нет соединения"
                     account.subscribed -> "Безлимитный доступ"
-                    ui.sending -> "Можно остановить в любой момент"
+                    busy -> "Можно остановить в любой момент"
                     else -> "${account.remaining} ${messageCount(account.remaining)}"
                 }
                 AnimatedContent(counter, modifier = Modifier.weight(1f).padding(start = 7.dp), label = "messageCounter",
@@ -151,9 +158,9 @@ internal fun ChatScreen(ui: UiState, title: String, messages: List<MessageEntity
                 Row(Modifier.padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (messages.isNotEmpty()) IconButton({ showSuggestions = true }, Modifier.size(38.dp)) { Icon(Icons.Default.Lightbulb, "Подсказки для сообщения", tint = ChatColors.Secondary, modifier = Modifier.size(22.dp)) }
                     BasicTextField(value = input, onValueChange = { if (it.length <= 10000) input = it }, modifier = Modifier.weight(1f).padding(horizontal = 5.dp).heightIn(min = 40.dp).semantics { contentDescription = "Сообщение" },
-                        maxLines = if (imeVisible) 4 else 6, enabled = !ui.sending, textStyle = TextStyle(color = ChatColors.Ink, fontSize = 14.sp, lineHeight = 21.sp), cursorBrush = SolidColor(ChatColors.Accent),
-                        decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (input.isEmpty()) Text(if (ui.sending) "Готовлю ответ…" else "Спросите о чём угодно…", fontSize = 13.sp, color = ChatColors.Secondary); inner() } })
-                    if (ui.sending) AppIconButton(Icons.Default.Stop, "Стоп", onStop, ChatColors.Ink, Color.White)
+                        maxLines = if (imeVisible) 4 else 6, enabled = !busy, textStyle = TextStyle(color = ChatColors.Ink, fontSize = 14.sp, lineHeight = 21.sp), cursorBrush = SolidColor(ChatColors.Accent),
+                        decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (input.isEmpty()) Text(if (busy) "Готовлю ответ…" else "Спросите о чём угодно…", fontSize = 13.sp, color = ChatColors.Secondary); inner() } })
+                    if (busy) AppIconButton(Icons.Default.Stop, if (ui.sending) "Стоп" else "Завершить печатание", onStop, ChatColors.Ink, Color.White)
                     else {
                         val enabled = input.isNotBlank() && account.loaded && !ui.connecting
                         AppIconButton(Icons.Default.ArrowUpward, "Отправить", { keyboard?.hide(); onSend(input); if (account.subscribed || account.remaining > 0) input = "" }, if (enabled) ChatColors.Accent else ChatColors.Background, Color.White, enabled)
@@ -218,10 +225,19 @@ internal fun ErrorNotice(message: String, onRetry: () -> Unit, enabled: Boolean,
 internal fun Markdown(text: String, streaming: Boolean, animate: Boolean, onPresented: () -> Unit) {
     val context = LocalContext.current
     val density = context.resources.displayMetrics.density
-    var shown by remember { mutableIntStateOf(if (animate) 0 else text.length) }
+    var shown by rememberSaveable { mutableIntStateOf(if (animate) 0 else text.length) }
+    var hasBeenDisplayed by rememberSaveable { mutableStateOf(false) }
+    var completionReported by rememberSaveable { mutableStateOf(false) }
+    val returningToViewport = remember { hasBeenDisplayed }
     var cursorVisible by remember { mutableStateOf(true) }
     val latestText by rememberUpdatedState(text)
     val finished by rememberUpdatedState(onPresented)
+    SideEffect { hasBeenDisplayed = true }
+    LaunchedEffect(Unit) {
+        // LazyColumn restores this keyed item's state after scrolling it back into view.
+        // Show all text already received while it was away, then animate only future chunks.
+        if (returningToViewport) shown = latestText.length
+    }
     LaunchedEffect(text, animate) {
         if (!animate || !android.animation.ValueAnimator.areAnimatorsEnabled()) shown = text.length
     }
@@ -239,7 +255,10 @@ internal fun Markdown(text: String, streaming: Boolean, animate: Boolean, onPres
         }
     }
     LaunchedEffect(shown, text, streaming) {
-        if (!streaming && shown >= text.length) finished()
+        if (!streaming && shown >= text.length && !completionReported) {
+            completionReported = true
+            finished()
+        }
     }
     val typing = streaming || shown < text.length
     LaunchedEffect(typing) {
@@ -254,15 +273,38 @@ internal fun Markdown(text: String, streaming: Boolean, animate: Boolean, onPres
     }).build() }
     val visibleText = text.take(shown.coerceAtMost(text.length))
     val formatted = remember(markwon, visibleText) { markwon.toMarkdown(visibleText) }
-    AndroidView(factory = { TextView(it).apply {
+    AndroidView(factory = { StreamingMarkdownView(it).apply {
         textSize = 15f; setTextColor(ChatColors.Ink.toArgb()); setLineSpacing(4 * density, 1.05f)
         setTextIsSelectable(true); includeFontPadding = false
     } }, update = { view ->
-        val content = SpannableStringBuilder(formatted)
-        if (typing) {
-            content.append(" ▍")
-            content.setSpan(ForegroundColorSpan(if (cursorVisible) ChatColors.Accent.toArgb() else Color.Transparent.toArgb()), content.length - 1, content.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        if (view.sourceMarkdown != visibleText) {
+            view.sourceMarkdown = visibleText
+            markwon.setParsedMarkdown(view, formatted)
         }
-        markwon.setParsedMarkdown(view, content)
+        if (view.isTextSelectable == typing) view.setTextIsSelectable(!typing)
+        view.showCursor(typing && cursorVisible)
     }, modifier = Modifier.fillMaxWidth())
+}
+
+/** Cursor is paint only: blinking and wrapping never insert characters or remeasure the text. */
+internal class StreamingMarkdownView(context: Context) : TextView(context) {
+    var sourceMarkdown: String? = null
+    private var cursorShown = false
+    private val cursorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChatColors.Accent.toArgb() }
+    fun showCursor(show: Boolean) {
+        if (cursorShown != show) { cursorShown = show; invalidate() }
+    }
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (!cursorShown) return
+        val lines = layout ?: return
+        val end = text.length
+        val line = lines.getLineForOffset(end)
+        val cursorWidth = 3 * resources.displayMetrics.density
+        val x = (compoundPaddingLeft + lines.getPrimaryHorizontal(end) - scrollX)
+            .coerceIn(compoundPaddingLeft.toFloat(), (width - compoundPaddingRight - cursorWidth).coerceAtLeast(compoundPaddingLeft.toFloat()))
+        val baseline = extendedPaddingTop + lines.getLineBaseline(line) - scrollY
+        canvas.drawRoundRect(x, baseline + paint.fontMetrics.ascent, x + cursorWidth,
+            baseline + paint.fontMetrics.descent, cursorWidth / 2, cursorWidth / 2, cursorPaint)
+    }
 }

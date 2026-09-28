@@ -59,7 +59,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun send(raw: String) {
         val text = raw.trim()
-        if (text.isEmpty() || _ui.value.sending || _ui.value.connecting) return
+        if (text.isEmpty() || _ui.value.sending || _ui.value.presentingId != null || _ui.value.connecting) return
         if (!account.value.loaded) { connect(); return }
         if (!account.value.subscribed && account.value.remaining <= 0) { navigate(Screen.PAYWALL); return }
         val chatId = _ui.value.chatId ?: UUID.randomUUID().toString()
@@ -104,7 +104,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun stop() {
-        val id = activeMessage ?: return
+        val id = activeMessage ?: run {
+            // The response can finish over SSE before its presentation. Keep every received byte.
+            _ui.update { it.copy(presentingId = null) }
+            return
+        }
         if (stopping) return
         stopping = true
         val job = generationJob

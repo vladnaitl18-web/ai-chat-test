@@ -2,6 +2,7 @@ package dev.test.aichat
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.test.junit4.createComposeRule
 import dev.test.aichat.ui.Markdown
 import org.junit.Assert.*
@@ -11,6 +12,26 @@ import org.junit.Test
 /** A component fixture only; no simulated answers are available in the application. */
 class TypewriterTest {
     @get:Rule val compose = createComposeRule()
+    @Test fun returningToViewportDoesNotReplayPreviouslyReceivedText() {
+        compose.mainClock.autoAdvance = false
+        val visible = mutableStateOf(true)
+        val streaming = mutableStateOf(true)
+        var completions = 0
+        compose.setContent {
+            val holder = rememberSaveableStateHolder()
+            if (visible.value) holder.SaveableStateProvider("reply") {
+                Markdown("Полученный ответ. ".repeat(50), streaming.value, true) { completions++ }
+            }
+        }
+        compose.mainClock.advanceTimeBy(160)
+        assertEquals(0, completions)
+        visible.value = false
+        compose.mainClock.advanceTimeBy(64)
+        streaming.value = false
+        visible.value = true
+        compose.mainClock.advanceTimeBy(160)
+        assertEquals("A restored message must show received text without replay", 1, completions)
+    }
     @Test fun largeChunksDoNotSkipTypingAndCompletionWaitsForVisibleText() {
         compose.mainClock.autoAdvance = false
         val text = mutableStateOf("Привет 🙂 мир")
