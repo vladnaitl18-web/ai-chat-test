@@ -18,3 +18,4 @@ cloud/.wrangler/
 cloud/.dev.vars
 cloud/.secrets.json
 cloud/dist/
+/dist/

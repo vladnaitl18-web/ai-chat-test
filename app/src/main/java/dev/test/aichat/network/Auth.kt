@@ -4,10 +4,12 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.provider.Settings
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -15,10 +17,22 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 data class Tokens(val access: String, val refresh: String)
-interface SessionStore { val deviceId: String; fun read(): Tokens?; fun write(tokens: Tokens) }
+interface SessionStore {
+    val deviceId: String
+    val needsDeviceBinding: Boolean get() = false
+    fun deviceBound() {}
+    fun read(): Tokens?
+    fun write(tokens: Tokens)
+}
 class SecureSessionStore(context: Context) : SessionStore {
     private val prefs = context.getSharedPreferences("session", Context.MODE_PRIVATE)
-    override val deviceId: String = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("device_id", it).commit() }
+    // App-scoped hash: the raw Android ID is never sent to the server.
+    override val deviceId: String = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        ?.takeIf { it.isNotBlank() }?.let { id ->
+            "android-" + MessageDigest.getInstance("SHA-256").digest("${context.packageName}:$id".toByteArray()).joinToString("") { "%02x".format(it) }
+        } ?: (prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("device_id", it).commit() })
+    override val needsDeviceBinding get() = prefs.getString("bound_device_id", null) != deviceId
+    override fun deviceBound() { check(prefs.edit().putString("bound_device_id", deviceId).commit()) }
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         return (store.getKey("chat-session", null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
@@ -50,18 +64,28 @@ class Auth(private val api: Api, val store: SessionStore) {
         val next = Tokens(json.getString("access_token"), json.getString("refresh_token"))
         store.write(next); tokens = next; return next.access
     }
+    private suspend fun deviceLogin(): String {
+        val body = JSONObject().put("device_id", store.deviceId)
+        if (store.needsDeviceBinding) tokens?.refresh?.let { body.put("legacy_refresh_token", it) }
+        val result = api.json("auth/device", body = body)
+        if (store.needsDeviceBinding && !result.optBoolean("device_bound"))
+            throw ApiException(503, "Сервер обновляется. Повторите вход немного позже.")
+        val access = accept(result)
+        if (result.optBoolean("device_bound")) store.deviceBound()
+        return access
+    }
     suspend fun token(): String = mutex.withLock {
-        tokens?.access ?: accept(api.json("auth/device", body = JSONObject().put("device_id", store.deviceId)))
+        if (store.needsDeviceBinding) deviceLogin() else tokens?.access ?: deviceLogin()
     }
     suspend fun refresh(rejected: String): String = mutex.withLock {
         val current = tokens
         if (current != null && current.access != rejected) return@withLock current.access
-        if (current == null) return@withLock accept(api.json("auth/device", body = JSONObject().put("device_id", store.deviceId)))
+        if (current == null) return@withLock deviceLogin()
         try { accept(api.json("auth/refresh", body = JSONObject().put("refresh_token", current.refresh))) }
         catch (e: ApiException) {
             // Only a definitive invalid refresh session permits device re-authentication; network errors never clear tokens.
             if (e.code != 401) throw e
-            accept(api.json("auth/device", body = JSONObject().put("device_id", store.deviceId)))
+            deviceLogin()
         }
     }
     suspend fun request(path: String, body: JSONObject? = null): JSONObject {

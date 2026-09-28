@@ -1,5 +1,6 @@
 package dev.test.aichat.ui
 
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,7 +62,7 @@ internal fun HistoryScreen(chats: List<ChatSummary>, selected: String?, onClose:
                 item(key = group) { SectionCaption(group) }
                 items(groupChats, key = { it.chat.id }) { item ->
                     val active = item.chat.id == selected
-                    Surface(onClick = { onOpen(item.chat.id) }, shape = RoundedCornerShape(21.dp), color = if (active) ChatColors.Lavender else Color.White,
+                    Surface(onClick = { onOpen(item.chat.id) }, modifier = Modifier.animateItem(fadeInSpec = tween(180), placementSpec = tween(220), fadeOutSpec = tween(160)), shape = RoundedCornerShape(21.dp), color = if (active) ChatColors.Lavender else Color.White,
                         border = if (active) BorderStroke(1.dp, ChatColors.Accent.copy(alpha = .15f)) else null) {
                         Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.Top) {
                             Box(Modifier.size(35.dp).background(if (active) Color.White.copy(alpha = .7f) else ChatColors.Background, RoundedCornerShape(11.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.ChatBubbleOutline, null, Modifier.size(17.dp), tint = if (active) ChatColors.Accent else ChatColors.Secondary) }

@@ -8,6 +8,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AuthTest {
+    @Test fun migrationPreservesOldCredentialsUntilServerConfirmsBinding() = runBlocking {
+        MockWebServer().use { server ->
+            var stored = Tokens("old-access", "old-refresh")
+            var bound = false
+            val store = object : SessionStore {
+                override val deviceId = "android-stable-device"
+                override val needsDeviceBinding get() = !bound
+                override fun deviceBound() { bound = true }
+                override fun read() = stored
+                override fun write(tokens: Tokens) { stored = tokens }
+            }
+            server.enqueue(MockResponse().setBody("""{"access_token":"wrong","refresh_token":"wrong"}"""))
+            server.enqueue(MockResponse().setBody("""{"access_token":"migrated","refresh_token":"new","device_bound":true}"""))
+            val auth = Auth(Api(server.url("/").toString()), store)
+            try { auth.token(); fail("Expected old backend rejection") } catch (e: ApiException) { assertEquals(503, e.code) }
+            assertEquals("old-refresh", stored.refresh)
+            assertEquals("migrated", auth.token())
+            assertTrue(bound)
+            repeat(2) { assertTrue(server.takeRequest().body.readUtf8().contains("old-refresh")) }
+            assertEquals("migrated", auth.token())
+            assertEquals(2, server.requestCount)
+        }
+    }
     private class MemoryStore : SessionStore {
         override val deviceId = "test-device-12345678"
         var tokens = Tokens("expired", "refresh")

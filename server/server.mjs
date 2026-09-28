@@ -25,6 +25,8 @@ export function createChatServer(options = {}) {
   if (config.dataFile && existsSync(config.dataFile)) state = JSON.parse(readFileSync(config.dataFile, 'utf8'));
   state.purchaseOwners ??= {};
   state.reservations ??= {};
+  state.deviceBindings ??= {};
+  state.migrationOwners ??= {};
   for (const { device } of Object.values(state.reservations)) {
     if (state.accounts[device]) state.accounts[device].remaining++;
   }
@@ -178,8 +180,21 @@ export function createChatServer(options = {}) {
         recent.push(Date.now()); attempts.set(key, recent);
         const b = await body(req);
         if (typeof b.device_id !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(b.device_id)) throw fail(400, 'Некорректный device_id');
-        account(b.device_id);
-        return json(res, 200, issue(b.device_id));
+        let device = state.deviceBindings[b.device_id];
+        if (!device) {
+          device = b.device_id;
+          if (b.legacy_refresh_token) {
+            const old = state.sessions[hash(String(b.legacy_refresh_token))];
+            if (!old || old.refreshUntil <= Date.now()) throw fail(401, 'Не удалось перенести сессию: срок входа истёк');
+            const owner = state.migrationOwners[old.device];
+            if (owner && owner !== b.device_id) throw fail(409, 'Сессия уже привязана к другому устройству');
+            state.migrationOwners[old.device] = b.device_id;
+            device = old.device;
+          }
+          state.deviceBindings[b.device_id] = device;
+        }
+        account(device);
+        return json(res, 200, { ...issue(device), device_bound: true });
       }
       if (req.method === 'POST' && path === '/auth/refresh') {
         const b = await body(req), digest = typeof b.refresh_token === 'string' ? hash(b.refresh_token) : '';

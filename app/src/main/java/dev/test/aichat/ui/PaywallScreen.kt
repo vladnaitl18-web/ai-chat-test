@@ -1,5 +1,8 @@
 package dev.test.aichat.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -66,7 +69,10 @@ internal fun PaywallScreen(state: BillingState, account: Account, onClose: () ->
             }
             state.plans.forEach { item ->
                 val checked = item.id == plan?.id
-                Surface(onClick = { selected = item.id }, color = if (checked) ChatColors.Lavender else Color.White, shape = RoundedCornerShape(20.dp), border = BorderStroke(if (checked) 1.5.dp else 1.dp, if (checked) ChatColors.Accent else ChatColors.Line), modifier = Modifier.fillMaxWidth().padding(bottom = 11.dp)) {
+                val cardColor by animateColorAsState(if (checked) ChatColors.Lavender else Color.White, tween(200), label = "planColor")
+                val borderColor by animateColorAsState(if (checked) ChatColors.Accent else ChatColors.Line, tween(200), label = "planBorder")
+                val borderWidth by animateDpAsState(if (checked) 1.5.dp else 1.dp, tween(200), label = "planWidth")
+                Surface(onClick = { selected = item.id }, color = cardColor, shape = RoundedCornerShape(20.dp), border = BorderStroke(borderWidth, borderColor), modifier = Modifier.fillMaxWidth().padding(bottom = 11.dp)) {
                     Row(Modifier.padding(horizontal = 15.dp, vertical = 19.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(21.dp).background(if (checked) ChatColors.Accent else Color.Transparent, CircleShape).border(1.5.dp, if (checked) ChatColors.Accent else ChatColors.Line, CircleShape), contentAlignment = Alignment.Center) { if (checked) Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = Color.White) }
                         Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(item.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold); Text("Отмена в любой момент", Modifier.padding(top = 4.dp), fontSize = 10.sp, color = ChatColors.Secondary) }

@@ -55,7 +55,7 @@ export default {
         const { success } = await env.AUTH_LIMIT.limit({ key: request.headers.get('CF-Connecting-IP') || 'unknown' });
         if (!success) throw fail(429, 'Слишком много попыток входа');
         if (!validId(body.device_id)) throw fail(400, 'Некорректный device_id');
-        device = body.device_id;
+        device = await env.DEVICES.getByName(body.device_id).resolveDevice(body.device_id, body.legacy_refresh_token);
       } else device = deviceFromToken(url.pathname === '/auth/refresh' ? String(body.refresh_token || '') : token);
       return await env.DEVICES.getByName(device).handle(device, url.pathname, url.search, request.method, token, body);
     } catch (error) { return errorResponse(error); }
@@ -76,6 +76,8 @@ export class DeviceChat extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS sessions (refreshHash TEXT PRIMARY KEY, accessHash TEXT UNIQUE NOT NULL, expiresAt INTEGER NOT NULL, refreshUntil INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS generations (id TEXT PRIMARY KEY, messages TEXT NOT NULL, retries INTEGER NOT NULL DEFAULT 0, retryChild TEXT, lastEvent INTEGER NOT NULL DEFAULT 0, terminal TEXT, createdAt INTEGER NOT NULL, reserved INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS events (generationId TEXT NOT NULL, seq INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(generationId,seq));
+      CREATE TABLE IF NOT EXISTS device_binding (id INTEGER PRIMARY KEY CHECK(id=1), canonical TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS migration_owner (id INTEGER PRIMARY KEY CHECK(id=1), stable TEXT NOT NULL);
     `);
     // An interrupted instance can replay persisted text and allow an explicit retry.
     for (const row of this.ctx.storage.sql.exec<{ id: string }>('SELECT id FROM generations WHERE terminal IS NULL')) {
@@ -89,6 +91,28 @@ export class DeviceChat extends DurableObject<Env> {
   private account(): Account { return this.one<Account>('SELECT * FROM account WHERE id=1')!; }
   private publicAccount() { const a = this.account(); return { remaining: a.remaining, subscribed: a.subscriptionUntil > Date.now() }; }
   private generation(id: string) { return this.one<Generation>('SELECT * FROM generations WHERE id=?', id); }
+  async resolveDevice(stable: string, legacyRefresh: unknown): Promise<string> {
+    const bound = this.one<{ canonical: string }>('SELECT canonical FROM device_binding WHERE id=1');
+    if (bound) return bound.canonical;
+    let canonical = stable;
+    if (typeof legacyRefresh === 'string' && legacyRefresh) {
+      const legacy = deviceFromToken(legacyRefresh);
+      if (legacy !== stable) {
+        // Only a valid old refresh token may link the existing account; quota/history stay in that object.
+        await this.env.DEVICES.getByName(legacy).claimMigration(legacyRefresh, stable);
+        canonical = legacy;
+      }
+    }
+    this.ctx.storage.sql.exec('INSERT OR IGNORE INTO device_binding(id,canonical) VALUES (1,?)', canonical);
+    return this.one<{ canonical: string }>('SELECT canonical FROM device_binding WHERE id=1')!.canonical;
+  }
+  async claimMigration(refresh: string, stable: string): Promise<void> {
+    const session = this.one<Session>('SELECT * FROM sessions WHERE refreshHash=?', hash(refresh));
+    if (!session || session.refreshUntil <= Date.now()) throw fail(401, 'Не удалось перенести сессию: срок входа истёк');
+    const existing = this.one<{ stable: string }>('SELECT stable FROM migration_owner WHERE id=1');
+    if (existing && existing.stable !== stable) throw fail(409, 'Сессия уже привязана к другому устройству');
+    this.ctx.storage.sql.exec('INSERT OR IGNORE INTO migration_owner(id,stable) VALUES (1,?)', stable);
+  }
   private issue(device: string, oldRefresh?: string) {
     const access = `v1.${device}.${randomBytes(32).toString('hex')}`;
     const refresh = `v1.${device}.${randomBytes(32).toString('hex')}`;
@@ -97,7 +121,7 @@ export class DeviceChat extends DurableObject<Env> {
       if (oldRefresh) this.ctx.storage.sql.exec('DELETE FROM sessions WHERE refreshHash=?', oldRefresh);
       this.ctx.storage.sql.exec('INSERT INTO sessions VALUES (?,?,?,?)', hash(refresh), hash(access), Date.now() + ttl * 1000, Date.now() + 30 * 86400000);
     });
-    return response({ access_token: access, refresh_token: refresh, expires_in: ttl, ...this.publicAccount() });
+    return response({ access_token: access, refresh_token: refresh, expires_in: ttl, device_bound: true, ...this.publicAccount() });
   }
   private authenticate(token: string): Session {
     const session = this.one<Session>('SELECT * FROM sessions WHERE accessHash=?', hash(token));
@@ -233,6 +257,7 @@ export class DeviceChat extends DurableObject<Env> {
           if (['done', 'failed', 'cancelled'].includes(event.type)) close();
         } };
         dispose = () => close(true);
+        write(': connected\n\n');
         heartbeat = setInterval(() => { if (valid()) write(': heartbeat\n\n'); }, 5000);
         listeners.add(listener);
         for (const event of this.ctx.storage.sql.exec<{ payload: string }>('SELECT payload FROM events WHERE generationId=? AND seq>? ORDER BY seq', g.id, after)) {
@@ -256,7 +281,7 @@ export class DeviceChat extends DurableObject<Env> {
     const timeout = setTimeout(() => controller.abort(new Error('Истекло время ожидания модели')), 180000);
     try {
       const upstream = await requestCompletion({ apiKey: this.env.OPENROUTER_API_KEY, backupKey: this.env.OPENROUTER_API_KEY_BACKUP,
-        model: DEFAULT_MODEL, messages, signal: controller.signal });
+        model: DEFAULT_MODEL, messages, signal: controller.signal, onAttempt: (event: { event: string; credential: string; status: number }) => console.log(JSON.stringify(event)) });
       if (!upstream.ok || !upstream.body) {
         console.warn(JSON.stringify({ event: 'provider_http_error', status: upstream.status }));
         await upstream.body?.cancel();

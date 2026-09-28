@@ -14,6 +14,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -68,7 +71,11 @@ internal fun ChatScreen(ui: UiState, title: String, messages: List<MessageEntity
         PageHeader(if (messages.isEmpty()) "AI Чат" else title, if (ui.sending) "Готовлю ответ для вас" else "Ваш помощник на каждый день",
             leading = { AppIconButton(Icons.Default.Menu, "Список чатов", onMenu) },
             trailing = { if (messages.isNotEmpty()) AppIconButton(Icons.Default.Add, "Новый чат", onNew, ChatColors.Lavender, ChatColors.Accent) })
-        ui.error?.let { ErrorNotice(it, onReconnect, !ui.connecting, Modifier.padding(horizontal = 20.dp), "Подключиться снова") }
+        val displayedError = remember { mutableStateOf("") }
+        LaunchedEffect(ui.error) { ui.error?.let { displayedError.value = it } }
+        AnimatedVisibility(ui.error != null, enter = fadeIn(tween(180)) + expandVertically(tween(220)), exit = fadeOut(tween(120)) + shrinkVertically(tween(180))) {
+            ErrorNotice(displayedError.value, onReconnect, !ui.connecting, Modifier.padding(horizontal = 20.dp), "Подключиться снова")
+        }
         if (messages.isEmpty() && imeVisible) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text("Напишите свой вопрос", color = ChatColors.Secondary, fontSize = 13.sp)
@@ -109,11 +116,13 @@ internal fun ChatScreen(ui: UiState, title: String, messages: List<MessageEntity
             Box(Modifier.weight(1f)) {
                 LazyColumn(state = list, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp)) {
                     items(messages, key = { it.id }) { message ->
+                        Box(Modifier.animateItem(fadeInSpec = tween(240), placementSpec = tween(240), fadeOutSpec = tween(160))) {
                         if (message.role == "user") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             Surface(color = ChatColors.Accent, shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp), modifier = Modifier.widthIn(max = 290.dp)) {
                                 Text(message.content, Modifier.padding(horizontal = 17.dp, vertical = 14.dp), color = Color.White, fontSize = 15.sp, lineHeight = 23.sp)
                             }
                         } else AssistantMessage(message, ui.sending, message.id == ui.presentingId, { onPresented(message.id) }) { onRetry(message.id) }
+                        }
                     }
                     item { Spacer(Modifier.height(2.dp)) }
                 }
@@ -181,7 +190,7 @@ private fun AssistantMessage(message: MessageEntity, sending: Boolean, animate: 
                 if (message.content.isNotEmpty()) Markdown(message.content, message.status == "streaming", animate, onPresented)
                 if (message.status == "streaming") Row(Modifier.padding(top = if (message.content.isEmpty()) 0.dp else 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
-                    Text(if (message.content.isEmpty()) "Обдумываю ваш вопрос…" else "Продолжаю…", Modifier.padding(start = 9.dp), fontSize = 11.sp, color = ChatColors.Secondary)
+                    Text(message.error ?: if (message.content.isEmpty()) "Обдумываю ваш вопрос…" else "Продолжаю…", Modifier.padding(start = 9.dp), fontSize = 11.sp, color = ChatColors.Secondary)
                 }
                 if (message.status in listOf("stopped", "superseded")) Text(if (message.status == "stopped") "Вы остановили ответ" else "Предыдущий ответ прерван", Modifier.padding(top = 12.dp), fontSize = 11.sp, color = ChatColors.Secondary)
                 if (message.status in listOf("error", "failed")) ErrorNotice((if (message.content.isNotEmpty()) "Часть ответа сохранена.\n" else "") + (message.error ?: "Проверьте сеть и повторите."), onRetry, !sending, Modifier.padding(top = if (message.content.isEmpty()) 0.dp else 15.dp))

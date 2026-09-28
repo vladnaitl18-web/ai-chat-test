@@ -83,7 +83,9 @@ test('cloud: failure refunds once, retains partial text, successful retry charge
 test('cloud: disconnected SSE resumes without duplicates or another charge', async t => {
   const app = await start(t, { outboundService: provider(['a', 'б', 'c', 'д'], 70) });
   const r = await app.generate(), stream = await app.events(r.data.generation_id), reader = stream.body.getReader();
-  const first = parse(new TextDecoder().decode((await reader.read()).value)); await reader.cancel();
+  let first = [];
+  while (!first.length) first = parse(new TextDecoder().decode((await reader.read()).value));
+  await reader.cancel();
   const rest = parse(await (await app.events(r.data.generation_id, first.at(-1).id)).text());
   assert.equal([...first, ...rest].filter(e => e.type === 'delta').map(e => e.text).join(''), 'aбcд');
   assert.equal(rest.at(-1).remaining, 2);
@@ -119,4 +121,28 @@ test('cloud: account and completed SSE survive runtime restart', async t => {
   const restored = await next.request('/account', app.token);
   assert.equal(restored.data.remaining, 2, JSON.stringify(restored));
   assert.equal(await (await next.events(r.data.generation_id, 0, app.token)).text(), expected);
+});
+test('cloud: migration keeps exhausted quota and SSE after reinstall', async t => {
+  const app = await start(t);
+  let first;
+  for (let i = 0; i < 3; i++) {
+    const r = await app.generate(); first ??= r.data.generation_id;
+    await (await app.events(r.data.generation_id)).text();
+  }
+  const stable = 'android-' + 'a'.repeat(64);
+  const migrated = await app.request('/auth/device', null, { device_id: stable, legacy_refresh_token: app.login.refresh_token });
+  assert.equal(migrated.status, 200); assert.equal(migrated.data.remaining, 0);
+  assert.equal(migrated.data.device_bound, true);
+  const reinstall = await app.request('/auth/device', null, { device_id: stable });
+  assert.equal(reinstall.data.remaining, 0);
+  assert.equal((await app.events(first, 0, reinstall.data.access_token)).status, 200);
+  assert.equal((await app.request('/generations', reinstall.data.access_token, { request_id: randomUUID(), messages: [{ role: 'user', content: 'Вопрос' }] })).status, 402);
+});
+test('cloud: migration needs valid credentials and cannot rebind an account', async t => {
+  const app = await start(t);
+  const first = 'android-' + 'b'.repeat(64), second = 'android-' + 'c'.repeat(64);
+  assert.notEqual((await app.request('/auth/device', null, { device_id: first, legacy_refresh_token: 'invalid' })).status, 200);
+  assert.equal((await app.request('/auth/device', null, { device_id: first, legacy_refresh_token: app.login.refresh_token })).status, 200);
+  assert.notEqual((await app.request('/auth/device', null, { device_id: second, legacy_refresh_token: app.login.refresh_token })).status, 200);
+  assert.equal((await app.request('/auth/device', null, { device_id: first })).data.remaining, 3);
 });

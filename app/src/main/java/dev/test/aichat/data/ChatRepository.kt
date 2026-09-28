@@ -2,6 +2,7 @@ package dev.test.aichat.data
 
 import dev.test.aichat.network.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
@@ -31,6 +32,7 @@ class ChatRepository(val dao: ChatDao, private val api: Api, val auth: Auth) {
                 dao.saveMessage(message)
             }
             var refreshCount = 0
+            var networkRetryCount = 0
             while (true) {
                 message = dao.message(messageId) ?: return
                 val token = auth.token()
@@ -55,10 +57,18 @@ class ChatRepository(val dao: ChatDao, private val api: Api, val auth: Auth) {
                     }
                     if (!terminal) throw IOException("Соединение прервано")
                     return
-                } catch (e: ApiException) {
-                    if (e.code != 401 || refreshCount >= 3) throw e
-                    refreshCount++
-                    auth.refresh(token)
+                } catch (e: IOException) {
+                    if (terminal) return
+                    if (e is ApiException && e.code == 401) {
+                        if (refreshCount >= 3) throw e
+                        refreshCount++
+                        auth.refresh(token)
+                    } else {
+                        val wait = retryDelay(e, networkRetryCount++) ?: throw e
+                        dao.message(messageId)?.let { dao.saveMessage(it.copy(error = "Восстанавливаю соединение ($networkRetryCount/2)…")) }
+                        delay(wait)
+                        dao.message(messageId)?.let { dao.saveMessage(it.copy(error = null)) }
+                    }
                 }
             }
         } catch (e: CancellationException) { throw e }
