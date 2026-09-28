@@ -1,6 +1,6 @@
 # Облачный backend
 
-Адрес версии 1.1: https://ai-chat-android-test.vladius-apps-bd9433.workers.dev/
+Адрес backend: https://ai-chat-android-test.vladius-apps-bd9433.workers.dev/
 
 Cloudflare Worker `ai-chat-android-test`, SQLite Durable Objects `DeviceChat` и `PurchaseOwner`. Телефону нужен интернет; Mac и общая Wi-Fi сеть не нужны. Приложение не содержит ключ OpenRouter. Он загружен в Cloudflare Secret.
 
@@ -39,7 +39,7 @@ WRANGLER_SEND_METRICS=false npx wrangler deploy --dry-run --outdir dist
 node --test cloud.test.mjs
 ```
 
-Шесть тестов Miniflare используют изолированный тестовый upstream: квота/идемпотентность/пейвол, возврат после ошибки, SSE resume, refresh посреди SSE, stop/изоляция устройств, восстановление событий после перезапуска. Тестовый upstream не включён в развёрнутый Worker.
+Девять тестов Miniflare используют изолированный тестовый upstream: квота/идемпотентность/пейвол, возврат после ошибки, SSE resume, refresh посреди SSE, stop/изоляция устройств, восстановление событий после перезапуска, два сценария миграции device_id и однократный сброс квоты. Тестовый upstream не включён в развёрнутый Worker.
 
 Живой Android-прогон использует реальный OpenRouter и не сбрасывает квоту:
 
@@ -53,4 +53,8 @@ adb shell am instrument -w -e liveCloud true -e class dev.test.aichat.LiveCloudA
 
 `OPENROUTER_API_KEY_BACKUP` — отдельный Cloudflare Secret. Подключён и проверен запросом `/api/v1/key`. Переключение выполняется максимум один раз, до начала SSE, при HTTP 401, 429 или 402 с `limit_source=openrouter_key_limit`. Баланс аккаунта и ошибки уже открытого стрима не запускают перебор ключей. `Retry-After` до 3 секунд выдерживается перед резервной попыткой; при более долгом ожидании запрос завершается ошибкой без автоматического повтора. Пользователь подтвердил, что резервный ключ относится к другому аккаунту. В этих случаях показывается ошибка и возвращается резерв бесплатного сообщения после терминального сбоя. Дополнительные ключи не увеличивают общие лимиты OpenRouter: https://openrouter.ai/docs/api_reference/limits .
 
-Проверки общей реализации резервного ключа: `node --test server/provider.test.mjs` (6 тестов). Вместе с локальным backend — 14/14; Cloudflare — 6/6.
+Проверки общей реализации резервного ключа: `node --test server/provider.test.mjs` (6 тестов). Вместе с локальным backend — 14/14; Cloudflare — 9/9.
+
+## Однократный административный сброс лимитов
+
+Оператор может задать новое уникальное значение секрета `QUOTA_RESET_EPOCH`. При следующем обращении каждый аккаунт один раз получает лимит 3 с учётом активных резервов. Повторный вход и перезапуск не повторяют сброс. История, сессии и подписки сохраняются. Публичного API сброса и кнопки в приложении нет.

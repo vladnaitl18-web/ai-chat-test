@@ -83,7 +83,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Проверки и материалы
 
-- 8 JVM-тестов, 14 Node-тестов и 8 Cloudflare-тестов прошли; Lint — без ошибок.
+[Видео работы приложения](https://github.com/vladnaitl18-web/ai-chat-test/blob/codex/ai-chat-test/media/AI-Chat-demo.mp4) — три настоящих ответа, история и автоматический пейвол; запись в реальном времени.
+
+- 8 JVM-тестов, 14 Node-тестов и 9 Cloudflare-тестов прошли; Lint — без ошибок.
 - 9 Android-проверок прошли: Room, сеть, клавиатура, цены, удаление, курсор, «Стоп» и возврат прокруткой. Настоящие ответы и автоматический пейвол также проверены.
 - Полный протокол: [acceptance.md](docs/acceptance.md). Исходные пять блоков ТЗ: [requirements.md](docs/requirements.md). API: [api.md](docs/api.md).
 - Публикация в Google Play и приёмка ПМ не выполнялись. Бесплатные AI-провайдеры могут временно отказывать; резерв не гарантирует доступность.

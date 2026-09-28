@@ -12,8 +12,8 @@ android {
         applicationId = providers.gradleProperty("applicationId").getOrElse("dev.test.aichat")
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_URL", "\"${providers.gradleProperty("apiUrl").getOrElse("https://ai-chat-android-test.vladius-apps-bd9433.workers.dev/")}\"")
     }

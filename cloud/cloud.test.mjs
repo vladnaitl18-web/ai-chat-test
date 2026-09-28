@@ -146,3 +146,26 @@ test('cloud: migration needs valid credentials and cannot rebind an account', as
   assert.notEqual((await app.request('/auth/device', null, { device_id: second, legacy_refresh_token: app.login.refresh_token })).status, 200);
   assert.equal((await app.request('/auth/device', null, { device_id: first })).data.remaining, 3);
 });
+
+test('cloud: operator epoch resets exhausted quotas once without erasing sessions or history', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-reset-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const app = await start(t, { resourcePersistencePath: dir });
+  let first;
+  for (let i = 0; i < 3; i++) {
+    const result = await app.generate(); first ??= result.data.generation_id;
+    await (await app.events(result.data.generation_id)).text();
+  }
+  assert.equal((await app.request('/account', app.token)).data.remaining, 0);
+  await app.mf.dispose();
+  const options = { resourcePersistencePath: dir, bindings: { OPENROUTER_API_KEY: 'test-only', ACCESS_TTL_SECONDS: '60', QUOTA_RESET_EPOCH: 'maintenance-test-1' } };
+  const next = await start(t, options);
+  assert.equal((await next.request('/account', app.token)).data.remaining, 3);
+  assert.equal((await next.events(first, 0, app.token)).status, 200);
+  const generation = await next.request('/generations', app.token, { request_id: randomUUID(), messages: [{ role: 'user', content: 'Вопрос' }] });
+  await (await next.events(generation.data.generation_id, 0, app.token)).text();
+  assert.equal((await next.request('/account', app.token)).data.remaining, 2);
+  assert.equal((await next.request('/account', app.token)).data.remaining, 2);
+  await next.mf.dispose();
+  const restarted = await start(t, options);
+  assert.equal((await restarted.request('/account', app.token)).data.remaining, 2);
+});

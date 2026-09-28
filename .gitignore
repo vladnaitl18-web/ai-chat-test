@@ -19,3 +19,4 @@ cloud/.dev.vars
 cloud/.secrets.json
 cloud/dist/
 /dist/
+cloud/cloud/dist/

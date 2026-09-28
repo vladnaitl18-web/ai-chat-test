@@ -20,9 +20,9 @@ class PaywallFallbackTest {
         if (compose.onAllNodesWithContentDescription("Закрыть пейвол").fetchSemanticsNodes().isEmpty()) compose.onNodeWithText("Попробовать Pro").performClick()
         compose.waitUntil(30000) { app.billing.state.value.plans.isNotEmpty() && !app.billing.state.value.loading }
         assertTrue(app.billing.state.value.plans.all { it.isPreview })
-        compose.onNodeWithText("ТЕСТОВЫЕ ЦЕНЫ").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("499 ₽").assertExists()
-        compose.onNodeWithText("1 290 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("ТЕСТОВЫЕ ЦЕНЫ").assertIsDisplayed()
+        compose.onNodeWithText("499 ₽").assertIsDisplayed()
+        compose.onNodeWithText("1 290 ₽").assertIsDisplayed()
         compose.onNodeWithText("Продолжить").assertIsNotEnabled()
         compose.onNodeWithText("Восстановить покупки").assertIsDisplayed().assertIsEnabled()
         val file = File(app.filesDir, "screenshots/cloud-preview-prices.png").apply { parentFile!!.mkdirs() }

@@ -78,6 +78,7 @@ export class DeviceChat extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS events (generationId TEXT NOT NULL, seq INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(generationId,seq));
       CREATE TABLE IF NOT EXISTS device_binding (id INTEGER PRIMARY KEY CHECK(id=1), canonical TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS migration_owner (id INTEGER PRIMARY KEY CHECK(id=1), stable TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS maintenance (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     // An interrupted instance can replay persisted text and allow an explicit retry.
     for (const row of this.ctx.storage.sql.exec<{ id: string }>('SELECT id FROM generations WHERE terminal IS NULL')) {
@@ -113,6 +114,16 @@ export class DeviceChat extends DurableObject<Env> {
     if (existing && existing.stable !== stable) throw fail(409, 'Сессия уже привязана к другому устройству');
     this.ctx.storage.sql.exec('INSERT OR IGNORE INTO migration_owner(id,stable) VALUES (1,?)', stable);
   }
+  private resetQuotaIfNeeded() {
+    const epoch = this.env.QUOTA_RESET_EPOCH;
+    if (!epoch || this.one<{ value: string }>("SELECT value FROM maintenance WHERE key='quota_reset'")?.value === epoch) return;
+    this.ctx.storage.transactionSync(() => {
+      // Existing in-flight requests keep their reservation; cancellation still refunds once.
+      const reserved = this.one<{ count: number }>('SELECT COALESCE(SUM(reserved),0) AS count FROM generations WHERE terminal IS NULL')!.count;
+      this.ctx.storage.sql.exec('UPDATE account SET remaining=? WHERE id=1', Math.max(0, 3 - reserved));
+      this.ctx.storage.sql.exec("INSERT OR REPLACE INTO maintenance(key,value) VALUES ('quota_reset',?)", epoch);
+    });
+  }
   private issue(device: string, oldRefresh?: string) {
     const access = `v1.${device}.${randomBytes(32).toString('hex')}`;
     const refresh = `v1.${device}.${randomBytes(32).toString('hex')}`;
@@ -140,6 +151,7 @@ export class DeviceChat extends DurableObject<Env> {
 
   async handle(device: string, path: string, search: string, method: string, token: string, body: Body): Promise<Response> {
     try {
+      this.resetQuotaIfNeeded();
       this.cleanup();
       if (path === '/auth/device' && method === 'POST') return this.issue(device);
       if (path === '/auth/refresh' && method === 'POST') {

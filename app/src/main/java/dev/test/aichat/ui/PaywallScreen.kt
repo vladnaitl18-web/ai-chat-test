@@ -21,25 +21,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.test.aichat.billing.BillingState
 import dev.test.aichat.billing.Plan
+import dev.test.aichat.billing.previewPlans
 import dev.test.aichat.data.Account
 
 @Composable
 internal fun PaywallScreen(state: BillingState, account: Account, onClose: () -> Unit, onRestore: () -> Unit, onReload: () -> Unit, onPurchase: (Plan) -> Unit, onDocument: (String) -> Unit) {
     var selected by rememberSaveable { mutableStateOf("chat_monthly") }
-    val plan = state.plans.find { it.id == selected } ?: state.plans.firstOrNull()
+    val plans = state.plans.ifEmpty { previewPlans }
+    val plan = plans.find { it.id == selected } ?: plans.firstOrNull()
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             AppIconButton(Icons.Default.Close, "Закрыть пейвол", onClose)
             Spacer(Modifier.weight(1f)); SmallPill("AI ЧАТ PRO")
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(10.dp))
-            Box(Modifier.size(78.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(78.dp).background(ChatColors.Lavender.copy(alpha = .5f), CircleShape))
-                Text("PRO", color = ChatColors.Accent, fontSize = 26.sp, fontWeight = FontWeight.Bold, letterSpacing = .5.sp)
+            Spacer(Modifier.height(4.dp))
+            Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(46.dp).background(ChatColors.Lavender.copy(alpha = .5f), CircleShape))
+                Text("PRO", color = ChatColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = .5.sp)
             }
-            Text("Безлимитный доступ", Modifier.padding(top = 16.dp), fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold, letterSpacing = (-.8).sp, textAlign = TextAlign.Center)
-            Text(if (account.remaining <= 0) "Хороший разговор не должен\nзаканчиваться из-за лимита." else "Больше пространства для ваших\nвопросов, идей и планов.", Modifier.padding(top = 12.dp, bottom = 25.dp), color = ChatColors.Secondary, fontSize = 14.sp, lineHeight = 22.sp, textAlign = TextAlign.Center)
+            Text("Безлимитный доступ", Modifier.padding(top = 9.dp), fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-.8).sp, textAlign = TextAlign.Center)
+            Text(if (account.remaining <= 0) "Хороший разговор не должен\nзаканчиваться из-за лимита." else "Больше пространства для ваших\nвопросов, идей и планов.", Modifier.padding(top = 7.dp, bottom = 13.dp), color = ChatColors.Secondary, fontSize = 12.sp, lineHeight = 17.sp, textAlign = TextAlign.Center)
             state.error?.let {
                 Surface(color = Color.White, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(19.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -51,6 +53,25 @@ internal fun PaywallScreen(state: BillingState, account: Account, onClose: () ->
                 }
             }
             if (state.error != null) Spacer(Modifier.height(18.dp))
+            if (plans.any { it.isPreview }) {
+                SmallPill("ТЕСТОВЫЕ ЦЕНЫ")
+                Text("Цены из макета · оплата недоступна", Modifier.padding(top = 5.dp, bottom = 10.dp), color = ChatColors.Secondary, fontSize = 10.sp, lineHeight = 14.sp, textAlign = TextAlign.Center)
+            }
+            plans.forEach { item ->
+                val checked = item.id == plan?.id
+                val cardColor by animateColorAsState(if (checked) ChatColors.Lavender else Color.White, tween(200), label = "planColor")
+                val borderColor by animateColorAsState(if (checked) ChatColors.Accent else ChatColors.Line, tween(200), label = "planBorder")
+                val borderWidth by animateDpAsState(if (checked) 1.5.dp else 1.dp, tween(200), label = "planWidth")
+                Surface(onClick = { selected = item.id }, color = cardColor, shape = RoundedCornerShape(20.dp), border = BorderStroke(borderWidth, borderColor), modifier = Modifier.fillMaxWidth().padding(bottom = 9.dp)) {
+                    Row(Modifier.padding(horizontal = 15.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(21.dp).background(if (checked) ChatColors.Accent else Color.Transparent, CircleShape).border(1.5.dp, if (checked) ChatColors.Accent else ChatColors.Line, CircleShape), contentAlignment = Alignment.Center) { if (checked) Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = Color.White) }
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(item.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold); Text("Отмена в любой момент", Modifier.padding(top = 4.dp), fontSize = 10.sp, color = ChatColors.Secondary) }
+                        Column(horizontalAlignment = Alignment.End) { Text(item.price, fontWeight = FontWeight.SemiBold, fontSize = 18.sp); Text(item.period, Modifier.padding(top = 4.dp), fontSize = 10.sp, color = ChatColors.Secondary) }
+                    }
+                }
+            }
+            if (state.loading) Text("Проверяем цены Google Play…", Modifier.padding(vertical = 5.dp), fontSize = 10.sp, color = ChatColors.Secondary)
+            Spacer(Modifier.height(14.dp))
             Surface(shape = RoundedCornerShape(22.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
                     listOf("Вопросы без ограничений", "Все диалоги под рукой", "Ответы с удобным оформлением").forEach { benefit ->
@@ -58,25 +79,6 @@ internal fun PaywallScreen(state: BillingState, account: Account, onClose: () ->
                             Box(Modifier.size(22.dp).background(ChatColors.Lavender, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = ChatColors.Accent) }
                             Text(benefit, Modifier.padding(start = 11.dp), fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         }
-                    }
-                }
-            }
-            Spacer(Modifier.height(23.dp))
-            if (state.loading) Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(20.dp)) { CircularProgressIndicator(Modifier.size(23.dp), strokeWidth = 2.dp); Text("Загружаем предложения…", Modifier.padding(top = 11.dp), fontSize = 11.sp, color = ChatColors.Secondary) }
-            if (state.plans.any { it.isPreview }) {
-                SmallPill("ТЕСТОВЫЕ ЦЕНЫ")
-                Text("Google Play пока не вернул тарифы.\nПоказаны цены из макета, оплата недоступна.", Modifier.padding(top = 8.dp, bottom = 14.dp), color = ChatColors.Secondary, fontSize = 11.sp, lineHeight = 16.sp, textAlign = TextAlign.Center)
-            }
-            state.plans.forEach { item ->
-                val checked = item.id == plan?.id
-                val cardColor by animateColorAsState(if (checked) ChatColors.Lavender else Color.White, tween(200), label = "planColor")
-                val borderColor by animateColorAsState(if (checked) ChatColors.Accent else ChatColors.Line, tween(200), label = "planBorder")
-                val borderWidth by animateDpAsState(if (checked) 1.5.dp else 1.dp, tween(200), label = "planWidth")
-                Surface(onClick = { selected = item.id }, color = cardColor, shape = RoundedCornerShape(20.dp), border = BorderStroke(borderWidth, borderColor), modifier = Modifier.fillMaxWidth().padding(bottom = 11.dp)) {
-                    Row(Modifier.padding(horizontal = 15.dp, vertical = 19.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(21.dp).background(if (checked) ChatColors.Accent else Color.Transparent, CircleShape).border(1.5.dp, if (checked) ChatColors.Accent else ChatColors.Line, CircleShape), contentAlignment = Alignment.Center) { if (checked) Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = Color.White) }
-                        Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(item.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold); Text("Отмена в любой момент", Modifier.padding(top = 4.dp), fontSize = 10.sp, color = ChatColors.Secondary) }
-                        Column(horizontalAlignment = Alignment.End) { Text(item.price, fontWeight = FontWeight.SemiBold, fontSize = 18.sp); Text(item.period, Modifier.padding(top = 4.dp), fontSize = 10.sp, color = ChatColors.Secondary) }
                     }
                 }
             }

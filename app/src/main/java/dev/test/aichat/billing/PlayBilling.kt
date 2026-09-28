@@ -75,7 +75,8 @@ class PlayBilling(context: Context, private val repository: ChatRepository, priv
         }
         if (!client.isReady) { _state.value = _state.value.copy(error = "Нет соединения с Google Play. Обновите тарифы."); return }
         val params = BillingFlowParams.newBuilder()
-            .setObfuscatedAccountId(repository.auth.store.deviceId)
+            .setObfuscatedAccountId(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(repository.auth.store.deviceId.toByteArray()).joinToString("") { "%02x".format(it) })
             .setProductDetailsParamsList(listOf(BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(details).setOfferToken(plan.offerToken).build()))
             .build()
         val result = client.launchBillingFlow(activity, params)
